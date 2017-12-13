@@ -12,12 +12,14 @@ public class Android4HttpsApplication extends Application{
     @Override
     public void onCreate() {
         super.onCreate();
-        try
-        {
+        try {
+            //单向认证
+            /*OkHttpClientManager.getInstance()
+                    .setOneWayCertificates(getAssets().open("server.cer"));*/
+            //双向认证
             OkHttpClientManager.getInstance()
-                    .setCertificates(getAssets().open("server.cer"));
-        } catch (IOException e)
-        {
+                    .setTwoWayCertificates(getAssets().open("client.bks"),getAssets().open("server.cer"));
+        } catch (IOException e){
             e.printStackTrace();
         }
     }

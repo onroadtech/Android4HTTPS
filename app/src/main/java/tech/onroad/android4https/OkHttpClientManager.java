@@ -2,6 +2,7 @@ package tech.onroad.android4https;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import com.google.gson.Gson;
 import com.google.gson.internal.$Gson$Types;
@@ -63,63 +64,79 @@ public class OkHttpClientManager {
     public OkHttpClient getOkHttpClient(){
         return mOkHttpClient;
     }
-
-    public void setCertificates(/*InputStream certificate_client,*/ InputStream... certificates)
-    {
-        try
-        {
+    /******************************
+     *  单向认证
+     ******************************/
+    public void setOneWayCertificates(InputStream... certificates){
+        try{
             CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
             KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
             keyStore.load(null);
             int index = 0;
-            for (InputStream certificate : certificates)
-            {
+            for (InputStream certificate : certificates){
                 String certificateAlias = Integer.toString(index++);
                 keyStore.setCertificateEntry(certificateAlias, certificateFactory.generateCertificate(certificate));
 
-                try
-                {
+                try{
                     if (certificate != null)
                         certificate.close();
-                } catch (IOException e)
-                {
+                } catch (IOException e){
+                    Log.e("OkHttpClientManager", e.getMessage());
                 }
             }
 
             SSLContext sslContext = SSLContext.getInstance("TLS");
-/*            TrustManagerFactory trustManagerFactory = TrustManagerFactory.
+            TrustManagerFactory trustManagerFactory =
+                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+
+            trustManagerFactory.init(keyStore);
+            sslContext.init(
+                            null,
+                            trustManagerFactory.getTrustManagers(),
+                            new SecureRandom());
+            mOkHttpClient.setSslSocketFactory(sslContext.getSocketFactory());
+        } catch (Exception e){
+            Log.e("OkHttpClientManager", e.getMessage());
+        }
+    }
+
+    /******************************
+    *  双向认证
+    ******************************/
+    public void setTwoWayCertificates(InputStream clientcertificates, InputStream... certificates)
+    {
+        try {
+            CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            keyStore.load(null);
+            int index = 0;
+            for (InputStream certificate : certificates) {
+                String certificateAlias = Integer.toString(index++);
+                keyStore.setCertificateEntry(certificateAlias, certificateFactory.generateCertificate(certificate));
+
+                try {
+                    if (certificate != null)
+                        certificate.close();
+                } catch (IOException e) {
+                }
+            }
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.
                     getInstance(TrustManagerFactory.getDefaultAlgorithm());
             trustManagerFactory.init(keyStore);
 
             //初始化keystore
             KeyStore clientKeyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-            clientKeyStore.load(certificate_client, "123456".toCharArray());
+            clientKeyStore.load(clientcertificates, "123456".toCharArray());
 
             KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             keyManagerFactory.init(clientKeyStore, "123456".toCharArray());
 
             sslContext.init(keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), new SecureRandom());
             mOkHttpClient.setSslSocketFactory(sslContext.getSocketFactory());
-*/
-            TrustManagerFactory trustManagerFactory =
-                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-
-            trustManagerFactory.init(keyStore);
-            sslContext.init
-                    (
-                            null,
-                            trustManagerFactory.getTrustManagers(),
-                            new SecureRandom()
-                    );
-            mOkHttpClient.setSslSocketFactory(sslContext.getSocketFactory());
-
-
-        } catch (Exception e)
-        {
+        } catch (Exception e) {
             e.printStackTrace();
         }
-
-
     }
 
     public static abstract class ResultCallback<T>

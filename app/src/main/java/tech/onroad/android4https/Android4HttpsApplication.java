@@ -1,14 +1,16 @@
 package tech.onroad.android4https;
 
 import android.app.Application;
+import android.util.Log;
 
 import java.io.IOException;
 
 /**
- * Created by TMS on 07/12/2017.
+ * Created by Liting Wang on 07/12/2017.
  */
 
 public class Android4HttpsApplication extends Application{
+    private static final String TAG = "Android4HttpsApp";
     @Override
     public void onCreate() {
         super.onCreate();
@@ -20,7 +22,7 @@ public class Android4HttpsApplication extends Application{
             OkHttpClientManager.getInstance()
                     .setTwoWayCertificates(getAssets().open("client.bks"),getAssets().open("server.cer"));
         } catch (IOException e){
-            e.printStackTrace();
+            Log.e(TAG, e.getMessage());
         }
     }
 }

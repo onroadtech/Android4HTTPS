@@ -4,6 +4,8 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 
+import okhttp3.Request;
+
 public class MainActivity extends AppCompatActivity {
     public static final String TAG = "MainActivity";
 
@@ -21,11 +23,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void postTest() {
-        OkHttpClientManager.getAsyn("https://192.168.0.101:8443/SpringBootBase/", new OkHttpClientManager.ResultCallback<String>()
-        {
-
+        OkHttpClientManager.getAsyn("https://192.168.0.101:8443/SpringBootBase/", new OkHttpClientManager.ResultCallback<String>() {
             @Override
-            public void onError(com.squareup.okhttp.Request request, Exception e) {
+            public void onError(Request request, Exception e) {
                 Log.e(TAG, e.getMessage());
             }
 

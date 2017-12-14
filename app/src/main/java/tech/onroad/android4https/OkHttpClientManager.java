@@ -5,30 +5,41 @@ import android.os.Looper;
 import android.util.Log;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonParseException;
 import com.google.gson.internal.$Gson$Types;
-import com.squareup.okhttp.Call;
-import com.squareup.okhttp.Callback;
-import com.squareup.okhttp.OkHttpClient;
-import com.squareup.okhttp.Request;
-import com.squareup.okhttp.Response;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.Cookie;
+import okhttp3.CookieJar;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
+import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 
 
 /**
- * Created by TMS on 07/12/2017.
+ * Created by Liting Wang on 07/12/2017.
  */
 
 public class OkHttpClientManager {
@@ -37,11 +48,23 @@ public class OkHttpClientManager {
     private Handler mDelivery;
     private Gson mGson;
 
-    private OkHttpClientManager()
-    {
-        mOkHttpClient = new OkHttpClient();
-        //cookie enabled
-        mOkHttpClient.setCookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER));
+    private OkHttpClientManager() {
+        OkHttpClient.Builder okHttpClient = new OkHttpClient.Builder();
+        okHttpClient.connectTimeout(5, TimeUnit.SECONDS);
+        okHttpClient.readTimeout(5, TimeUnit.SECONDS);
+        okHttpClient.cookieJar(new CookieJar() {
+            private final HashMap<HttpUrl, List<Cookie>> cookieStore = new HashMap<>();
+            @Override
+            public void saveFromResponse(HttpUrl url, List<Cookie> cookies) {
+                cookieStore.put(url, cookies);
+            }
+
+            @Override
+            public List<Cookie> loadForRequest(HttpUrl url) {
+                return null;
+            }
+        });
+        mOkHttpClient=okHttpClient.build();
         mDelivery = new Handler(Looper.getMainLooper());
         mGson = new Gson();
     }
@@ -67,34 +90,23 @@ public class OkHttpClientManager {
     /******************************
      *  单向认证
      ******************************/
-    public void setOneWayCertificates(InputStream... certificates){
+    public void setOneWayCertificates(InputStream certificates){
+        X509TrustManager trustManager;
         try{
-            CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
-            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-            keyStore.load(null);
-            int index = 0;
-            for (InputStream certificate : certificates){
-                String certificateAlias = Integer.toString(index++);
-                keyStore.setCertificateEntry(certificateAlias, certificateFactory.generateCertificate(certificate));
-
-                try{
-                    if (certificate != null)
-                        certificate.close();
-                } catch (IOException e){
-                    Log.e("OkHttpClientManager", e.getMessage());
-                }
-            }
-
+            trustManager = trustManagerForCertificates(certificates);
             SSLContext sslContext = SSLContext.getInstance("TLS");
+            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
             TrustManagerFactory trustManagerFactory =
                     TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
 
             trustManagerFactory.init(keyStore);
             sslContext.init(
-                            null,
-                            trustManagerFactory.getTrustManagers(),
-                            new SecureRandom());
-            mOkHttpClient.setSslSocketFactory(sslContext.getSocketFactory());
+                    null,
+                    new TrustManager[] { trustManager },
+                    new SecureRandom());
+            mOkHttpClient = new OkHttpClient.Builder()
+                    .sslSocketFactory(sslContext.getSocketFactory(), trustManager)
+                    .build();
         } catch (Exception e){
             Log.e("OkHttpClientManager", e.getMessage());
         }
@@ -103,39 +115,72 @@ public class OkHttpClientManager {
     /******************************
     *  双向认证
     ******************************/
-    public void setTwoWayCertificates(InputStream clientcertificates, InputStream... certificates)
-    {
+    public void setTwoWayCertificates(InputStream clientCertificates, InputStream certificates) {
+        X509TrustManager trustManager;
         try {
-            CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
-            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-            keyStore.load(null);
-            int index = 0;
-            for (InputStream certificate : certificates) {
-                String certificateAlias = Integer.toString(index++);
-                keyStore.setCertificateEntry(certificateAlias, certificateFactory.generateCertificate(certificate));
+            trustManager = trustManagerForCertificates(certificates);
 
-                try {
-                    if (certificate != null)
-                        certificate.close();
-                } catch (IOException e) {
-                }
-            }
             SSLContext sslContext = SSLContext.getInstance("TLS");
-            TrustManagerFactory trustManagerFactory = TrustManagerFactory.
-                    getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            trustManagerFactory.init(keyStore);
 
             //初始化keystore
             KeyStore clientKeyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-            clientKeyStore.load(clientcertificates, "123456".toCharArray());
+            clientKeyStore.load(clientCertificates, "123456".toCharArray());
 
             KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             keyManagerFactory.init(clientKeyStore, "123456".toCharArray());
 
-            sslContext.init(keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), new SecureRandom());
-            mOkHttpClient.setSslSocketFactory(sslContext.getSocketFactory());
+            sslContext.init(
+                    keyManagerFactory.getKeyManagers(),
+                    new TrustManager[] { trustManager },
+                    new SecureRandom());
+            mOkHttpClient = new OkHttpClient.Builder()
+                    .sslSocketFactory(sslContext.getSocketFactory(), trustManager)
+                    .build();
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    private X509TrustManager trustManagerForCertificates(InputStream in)
+            throws GeneralSecurityException {
+        CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+        Collection<? extends Certificate> certificates = certificateFactory.generateCertificates(in);
+        if (certificates.isEmpty()) {
+            throw new IllegalArgumentException("expected non-empty set of trusted certificates");
+        }
+
+        // Put the certificates a key store.
+        char[] password = "123456".toCharArray(); // Any password will work.
+        KeyStore keyStore = newEmptyKeyStore(password);
+        int index = 0;
+        for (Certificate certificate : certificates) {
+            String certificateAlias = Integer.toString(index++);
+            keyStore.setCertificateEntry(certificateAlias, certificate);
+        }
+
+        // Use it to build an X509 trust manager.
+        KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(
+                KeyManagerFactory.getDefaultAlgorithm());
+        keyManagerFactory.init(keyStore, password);
+        TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+                TrustManagerFactory.getDefaultAlgorithm());
+        trustManagerFactory.init(keyStore);
+        TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
+        if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+            throw new IllegalStateException("Unexpected default trust managers:"
+                    + Arrays.toString(trustManagers));
+        }
+        return (X509TrustManager) trustManagers[0];
+    }
+
+    private KeyStore newEmptyKeyStore(char[] password) throws GeneralSecurityException {
+        try {
+            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+            InputStream in = null; // By convention, 'null' creates an empty key store.
+            keyStore.load(in, password);
+            return keyStore;
+        } catch (IOException e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -190,40 +235,29 @@ public class OkHttpClientManager {
                 .build();
         deliveryResult(callback, request);
     }
-    private void deliveryResult(final ResultCallback callback, Request request)
-    {
-        mOkHttpClient.newCall(request).enqueue(new Callback()
-        {
+    private void deliveryResult(final ResultCallback callback, Request request) {
+        mOkHttpClient.newCall(request).enqueue(new Callback() {
             @Override
-            public void onFailure(Request request, IOException e) {
-                sendFailedStringCallback(request, e, callback);
+            public void onFailure(Call call, IOException e) {
+                sendFailedStringCallback(call.request(), e, callback);
             }
 
             @Override
-            public void onResponse(Response response) throws IOException {
-                try
-                {
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
                     final String string = response.body().string();
-                    if (callback.mType == String.class)
-                    {
+                    if (callback.mType == String.class) {
                         sendSuccessResultCallback(string, callback);
-                    } else
-                    {
+                    } else {
                         Object o = mGson.fromJson(string, callback.mType);
                         sendSuccessResultCallback(o, callback);
                     }
-
-
-                } catch (IOException e)
-                {
+                } catch (IOException e) {
                     sendFailedStringCallback(response.request(), e, callback);
-                } catch (com.google.gson.JsonParseException e)//Json解析的错误
-                {
+                } catch (JsonParseException e) {  //Json解析的错误
                     sendFailedStringCallback(response.request(), e, callback);
                 }
             }
-
-
         });
     }
 
